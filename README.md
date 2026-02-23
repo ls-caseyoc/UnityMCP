@@ -163,6 +163,9 @@ Default endpoint:
    - `assets.import`
 5. Verify a JSON-RPC response is returned.
 
+Selection tool note:
+- `scene.selectObject` / `scene.setSelection` support optional `ping` and `focus` booleans to highlight and frame the selection in the Unity Editor.
+
 Example MCP `initialize` request:
 ```json
 {

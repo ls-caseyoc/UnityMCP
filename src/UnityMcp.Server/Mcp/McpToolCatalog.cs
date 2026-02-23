@@ -129,6 +129,16 @@ public sealed class McpToolCatalog
                         {
                             ["type"] = "integer",
                             ["description"] = "Unity instance id of the object to select."
+                        },
+                        ["ping"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Ping/highlight the selected object in the Editor."
+                        },
+                        ["focus"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Best-effort frame the selection in the Scene view."
                         }
                     }
                 }),
@@ -150,6 +160,16 @@ public sealed class McpToolCatalog
                             {
                                 ["type"] = "integer"
                             }
+                        },
+                        ["ping"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Ping/highlight the active selected object in the Editor."
+                        },
+                        ["focus"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Best-effort frame the selection in the Scene view."
                         }
                     }
                 }),

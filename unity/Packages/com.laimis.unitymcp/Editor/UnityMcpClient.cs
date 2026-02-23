@@ -324,10 +324,13 @@ internal sealed class UnityMcpClient : IDisposable
     {
         var paramsObject = RequireParamsObject(root, "scene.selectObject");
         var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var ping = ParseOptionalBooleanParameter(paramsObject, "ping");
+        var focus = ParseOptionalBooleanParameter(paramsObject, "focus");
         var targetObject = ResolveObjectByInstanceId(instanceId, "instanceId");
 
         Selection.activeObject = targetObject;
         Selection.objects = new[] { targetObject };
+        ApplySelectionEditorPresentation(targetObject, ping, focus);
 
         return UnityMcpProtocol.CreateResult(idToken, BuildSelectionSummaryResult());
     }
@@ -335,6 +338,8 @@ internal sealed class UnityMcpClient : IDisposable
     private static string BuildSetSelectionResponse(JToken idToken, JObject root)
     {
         var paramsObject = RequireParamsObject(root, "scene.setSelection");
+        var ping = ParseOptionalBooleanParameter(paramsObject, "ping");
+        var focus = ParseOptionalBooleanParameter(paramsObject, "focus");
         if (!paramsObject.TryGetValue("instanceIds", out var instanceIdsToken) || instanceIdsToken is not JArray instanceIdsArray)
         {
             throw new ArgumentException("Parameter 'instanceIds' is required and must be an array of integers.");
@@ -365,6 +370,7 @@ internal sealed class UnityMcpClient : IDisposable
         }
 
         Selection.objects = resolvedObjects.ToArray();
+        ApplySelectionEditorPresentation(Selection.activeObject, ping, focus);
 
         return UnityMcpProtocol.CreateResult(idToken, BuildSelectionSummaryResult());
     }
@@ -908,6 +914,27 @@ internal sealed class UnityMcpClient : IDisposable
         return value.Value;
     }
 
+    private static bool ParseOptionalBooleanParameter(JObject paramsObject, string parameterName, bool defaultValue = false)
+    {
+        if (!paramsObject.TryGetValue(parameterName, out var token))
+        {
+            return defaultValue;
+        }
+
+        if (token.Type != JTokenType.Boolean)
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' must be a boolean.");
+        }
+
+        var value = token.Value<bool?>();
+        if (!value.HasValue)
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' must be a boolean.");
+        }
+
+        return value.Value;
+    }
+
     private static UnityEngine.Object ResolveObjectByInstanceId(int instanceId, string parameterName)
     {
         var resolved = TryResolveObjectByEntityId(instanceId) ?? ResolveObjectByLegacyInstanceId(instanceId);
@@ -961,6 +988,34 @@ internal sealed class UnityMcpClient : IDisposable
 #pragma warning disable CS0618 // Unity 6 deprecates InstanceIDToObject in favor of EntityIdToObject.
         return EditorUtility.InstanceIDToObject(instanceId);
 #pragma warning restore CS0618
+    }
+
+    private static void ApplySelectionEditorPresentation(UnityEngine.Object? pingTarget, bool ping, bool focus)
+    {
+        if (ping && pingTarget != null)
+        {
+            EditorGUIUtility.PingObject(pingTarget);
+        }
+
+        if (!focus)
+        {
+            return;
+        }
+
+        // Scene framing only applies to scene-object selections; assets should no-op.
+        if (Selection.activeTransform == null && Selection.activeGameObject == null)
+        {
+            return;
+        }
+
+        try
+        {
+            SceneView.lastActiveSceneView?.FrameSelected();
+        }
+        catch
+        {
+            // Best-effort editor UX enhancement; selection change itself already succeeded.
+        }
     }
 
     private static Vector3 ParsePosition(JToken positionToken)

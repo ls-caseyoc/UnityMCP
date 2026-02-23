@@ -435,6 +435,10 @@ Request:
 ```
 
 ## `scene.selectObject` Example
+Optional params:
+- `ping` (`boolean`): highlights the selected object in the Unity Editor.
+- `focus` (`boolean`): best-effort frames the selection in the Scene view.
+
 Request:
 ```json
 {
@@ -442,12 +446,18 @@ Request:
   "id": 13,
   "method": "scene.selectObject",
   "params": {
-    "instanceId": 45458
+    "instanceId": 45458,
+    "ping": true,
+    "focus": true
   }
 }
 ```
 
 ## `scene.setSelection` Example
+Optional params:
+- `ping` (`boolean`): highlights the active selected object in the Unity Editor.
+- `focus` (`boolean`): best-effort frames the selection in the Scene view.
+
 Request:
 ```json
 {
@@ -455,7 +465,9 @@ Request:
   "id": 14,
   "method": "scene.setSelection",
   "params": {
-    "instanceIds": [45458, 45459]
+    "instanceIds": [45458, 45459],
+    "ping": true,
+    "focus": true
   }
 }
 ```
