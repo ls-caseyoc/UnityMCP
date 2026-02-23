@@ -33,16 +33,25 @@ internal static class UnityMcpConsoleLogBuffer
         }
     }
 
-    public static ConsoleLogQueryResult GetSnapshot(int maxResults, bool includeStackTrace, IReadOnlyCollection<string>? levels = null)
+    public static ConsoleLogQueryResult GetSnapshot(
+        int maxResults,
+        bool includeStackTrace,
+        IReadOnlyCollection<string>? levels = null,
+        string? contains = null)
     {
         EnsureInitialized();
-        return QueryInternal(afterSequence: null, maxResults, includeStackTrace, levels);
+        return QueryInternal(afterSequence: null, maxResults, includeStackTrace, levels, contains);
     }
 
-    public static ConsoleLogQueryResult GetTail(long afterSequence, int maxResults, bool includeStackTrace, IReadOnlyCollection<string>? levels = null)
+    public static ConsoleLogQueryResult GetTail(
+        long afterSequence,
+        int maxResults,
+        bool includeStackTrace,
+        IReadOnlyCollection<string>? levels = null,
+        string? contains = null)
     {
         EnsureInitialized();
-        return QueryInternal(afterSequence, maxResults, includeStackTrace, levels);
+        return QueryInternal(afterSequence, maxResults, includeStackTrace, levels, contains);
     }
 
     private static void OnLogMessageReceivedThreaded(string condition, string stackTrace, LogType type)
@@ -66,7 +75,12 @@ internal static class UnityMcpConsoleLogBuffer
         }
     }
 
-    private static ConsoleLogQueryResult QueryInternal(long? afterSequence, int maxResults, bool includeStackTrace, IReadOnlyCollection<string>? levels)
+    private static ConsoleLogQueryResult QueryInternal(
+        long? afterSequence,
+        int maxResults,
+        bool includeStackTrace,
+        IReadOnlyCollection<string>? levels,
+        string? contains)
     {
         List<ConsoleLogEntry> selected = new();
         long bufferStartSequence;
@@ -74,6 +88,10 @@ internal static class UnityMcpConsoleLogBuffer
         int totalBuffered;
         bool truncated;
         bool cursorBehindBuffer;
+        var containsFilter = string.IsNullOrWhiteSpace(contains) ? null : contains;
+        var levelSet = levels is { Count: > 0 }
+            ? new HashSet<string>(levels, StringComparer.OrdinalIgnoreCase)
+            : null;
 
         lock (Sync)
         {
@@ -111,7 +129,7 @@ internal static class UnityMcpConsoleLogBuffer
                 var availableCount = Entries.Count - startIndex;
                 truncated = false;
 
-                if (levels is null || levels.Count == 0)
+                if (levelSet == null && containsFilter == null)
                 {
                     var takeCount = Math.Min(maxResults, Math.Max(0, availableCount));
                     truncated = availableCount > takeCount;
@@ -123,23 +141,47 @@ internal static class UnityMcpConsoleLogBuffer
                 }
                 else
                 {
-                    var levelSet = new HashSet<string>(levels, StringComparer.OrdinalIgnoreCase);
-                    for (var index = startIndex; index < Entries.Count; index++)
+                    if (afterSequence.HasValue)
                     {
-                        var entry = Entries[index];
-                        if (!levelSet.Contains(entry.Level))
+                        for (var index = startIndex; index < Entries.Count; index++)
                         {
-                            continue;
-                        }
+                            var entry = Entries[index];
+                            if (!MatchesFilters(entry, levelSet, containsFilter))
+                            {
+                                continue;
+                            }
 
-                        if (selected.Count < maxResults)
-                        {
-                            selected.Add(entry);
+                            if (selected.Count < maxResults)
+                            {
+                                selected.Add(entry);
+                            }
+                            else
+                            {
+                                truncated = true;
+                                break;
+                            }
                         }
-                        else
+                    }
+                    else
+                    {
+                        for (var index = 0; index < Entries.Count; index++)
                         {
-                            truncated = true;
-                            break;
+                            var entry = Entries[index];
+                            if (!MatchesFilters(entry, levelSet, containsFilter))
+                            {
+                                continue;
+                            }
+
+                            if (selected.Count < maxResults)
+                            {
+                                selected.Add(entry);
+                            }
+                            else
+                            {
+                                selected.RemoveAt(0);
+                                selected.Add(entry);
+                                truncated = true;
+                            }
                         }
                     }
                 }
@@ -181,6 +223,22 @@ internal static class UnityMcpConsoleLogBuffer
             truncated,
             includeStackTrace,
             items);
+    }
+
+    private static bool MatchesFilters(ConsoleLogEntry entry, HashSet<string>? levelSet, string? containsFilter)
+    {
+        if (levelSet != null && !levelSet.Contains(entry.Level))
+        {
+            return false;
+        }
+
+        if (containsFilter != null &&
+            entry.Message.IndexOf(containsFilter, StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static string MapLevel(LogType logType)

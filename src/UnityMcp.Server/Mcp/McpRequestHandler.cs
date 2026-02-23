@@ -671,7 +671,7 @@ public sealed class McpRequestHandler
 
     private static JsonObject? CreateConsoleResourceArguments(IReadOnlyDictionary<string, StringValues> queryParameters)
     {
-        ValidateAllowedQueryKeys(queryParameters, "maxResults", "includeStackTrace", "level");
+        ValidateAllowedQueryKeys(queryParameters, "maxResults", "includeStackTrace", "contains", "level");
 
         JsonObject? argumentsNode = null;
         AddConsoleQueryArguments(ref argumentsNode, queryParameters);
@@ -680,7 +680,7 @@ public sealed class McpRequestHandler
 
     private static JsonObject CreateConsoleTailResourceArguments(IReadOnlyDictionary<string, StringValues> queryParameters, string afterSequenceText)
     {
-        ValidateAllowedQueryKeys(queryParameters, "maxResults", "includeStackTrace", "level");
+        ValidateAllowedQueryKeys(queryParameters, "maxResults", "includeStackTrace", "contains", "level");
 
         if (!long.TryParse(afterSequenceText, out var afterSequence) || afterSequence < 0)
         {
@@ -747,6 +747,12 @@ public sealed class McpRequestHandler
         {
             argumentsNode ??= new JsonObject();
             argumentsNode["includeStackTrace"] = ParseQueryBoolean(includeStackTraceText!, "includeStackTrace");
+        }
+
+        if (TryGetSingleQueryParameter(queryParameters, "contains", out var containsText))
+        {
+            argumentsNode ??= new JsonObject();
+            argumentsNode["contains"] = containsText;
         }
 
         AddRepeatedConsoleLevelQueryArgument(ref argumentsNode, queryParameters);

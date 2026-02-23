@@ -60,6 +60,8 @@ public sealed class McpRequestHandlerTests
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.getActiveScene");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.listOpenScenes");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.getSelection");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.selectObject");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.setSelection");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.createGameObject");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "assets.find");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "assets.import");
@@ -338,6 +340,29 @@ public sealed class McpRequestHandlerTests
     }
 
     [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenResourceReadTargetsEditorConsoleLogsWithContainsFilter()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"returnedCount":1,"items":[{"sequence":9,"message":"MissingReferenceException"}]}}""");
+        });
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"read-console-1d","method":"resources/read","params":{"uri":"unitymcp://editor/console-logs?contains=MissingReference"}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        Assert.Equal("MissingReference", forwarded.RootElement.GetProperty("params").GetProperty("contains").GetString());
+    }
+
+    [Fact]
     public async Task HandlePostAsync_ForwardsUnityRequest_WhenResourceReadTargetsEditorConsoleTailTemplateWithQueryParameters()
     {
         // Arrange
@@ -392,6 +417,31 @@ public sealed class McpRequestHandlerTests
     }
 
     [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenResourceReadTargetsEditorConsoleTailTemplateWithContainsFilter()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"afterSequence":10,"nextAfterSequence":11,"returnedCount":1,"items":[{"sequence":11,"message":"NullReferenceException"}]}}""");
+        });
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"read-console-2d","method":"resources/read","params":{"uri":"unitymcp://editor/console-tail/10?contains=NullReference"}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        var forwardedParams = forwarded.RootElement.GetProperty("params");
+        Assert.Equal("editor.consoleTail", forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal("NullReference", forwardedParams.GetProperty("contains").GetString());
+    }
+
+    [Fact]
     public async Task HandlePostAsync_ReturnsStructuredInvalidParamsError_WhenConsoleTailCursorIsInvalid()
     {
         // Arrange
@@ -412,6 +462,25 @@ public sealed class McpRequestHandlerTests
         Assert.Equal("resources/read", data.GetProperty("source").GetString());
         Assert.Equal("unitymcp://editor/console-tail/not-a-number", data.GetProperty("resourceUri").GetString());
         Assert.Equal("afterSequence", data.GetProperty("parameter").GetString());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ReturnsStructuredInvalidParamsError_WhenConsoleQueryContainsDuplicateContains()
+    {
+        // Arrange
+        var handler = CreateHandler((_, _, _) => throw new InvalidOperationException("Relay should not be called."));
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"read-console-invalid-dup-contains","method":"resources/read","params":{"uri":"unitymcp://editor/console-logs?contains=a&contains=b"}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        using var document = JsonDocument.Parse(response.Body!);
+        var error = document.RootElement.GetProperty("error");
+        Assert.Equal(-32602, error.GetProperty("code").GetInt32());
+        Assert.Equal("contains", error.GetProperty("data").GetProperty("parameter").GetString());
     }
 
     [Fact]
@@ -681,6 +750,69 @@ public sealed class McpRequestHandlerTests
         var toolResult = document.RootElement.GetProperty("result");
         Assert.False(toolResult.GetProperty("isError").GetBoolean());
         Assert.Equal(123, toolResult.GetProperty("structuredContent").GetProperty("instanceId").GetInt32());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsSceneSelectObject()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"count":1,"activeObject":{"instanceId":45458,"name":"Cube"},"activeGameObject":{"instanceId":45458,"name":"Cube"},"items":[{"instanceId":45458,"name":"Cube"}]}}""");
+        });
+
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"sel-1","method":"tools/call","params":{"name":"scene.selectObject","arguments":{"instanceId":45458}}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using (var forwarded = JsonDocument.Parse(forwardedRequestJson!))
+        {
+            Assert.Equal("scene.selectObject", forwarded.RootElement.GetProperty("method").GetString());
+            Assert.Equal(45458, forwarded.RootElement.GetProperty("params").GetProperty("instanceId").GetInt32());
+        }
+
+        using var document = JsonDocument.Parse(response.Body!);
+        Assert.False(document.RootElement.GetProperty("result").GetProperty("isError").GetBoolean());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsSceneSetSelection()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"count":2,"items":[{"instanceId":1},{"instanceId":2}]}}""");
+        });
+
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"sel-2","method":"tools/call","params":{"name":"scene.setSelection","arguments":{"instanceIds":[1,2]}}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using (var forwarded = JsonDocument.Parse(forwardedRequestJson!))
+        {
+            Assert.Equal("scene.setSelection", forwarded.RootElement.GetProperty("method").GetString());
+            var instanceIds = forwarded.RootElement.GetProperty("params").GetProperty("instanceIds");
+            Assert.Equal(2, instanceIds.GetArrayLength());
+            Assert.Equal(1, instanceIds[0].GetInt32());
+            Assert.Equal(2, instanceIds[1].GetInt32());
+        }
+
+        using var document = JsonDocument.Parse(response.Body!);
+        Assert.False(document.RootElement.GetProperty("result").GetProperty("isError").GetBoolean());
     }
 
     [Fact]

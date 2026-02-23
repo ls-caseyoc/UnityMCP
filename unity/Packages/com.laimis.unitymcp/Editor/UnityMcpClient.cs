@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -188,6 +189,8 @@ internal sealed class UnityMcpClient : IDisposable
                 "scene.getActiveScene" => BuildGetActiveSceneResponse(idToken),
                 "scene.listOpenScenes" => BuildListOpenScenesResponse(idToken),
                 "scene.getSelection" => BuildGetSelectionResponse(idToken),
+                "scene.selectObject" => BuildSelectObjectResponse(idToken, root),
+                "scene.setSelection" => BuildSetSelectionResponse(idToken, root),
                 "scene.createGameObject" => BuildCreateGameObjectResponse(idToken, root),
                 "scene.findByTag" => BuildFindByTagResponse(idToken, root),
                 "assets.find" => BuildFindAssetsResponse(idToken, root),
@@ -235,10 +238,11 @@ internal sealed class UnityMcpClient : IDisposable
             out var maxResults,
             out var includeStackTrace,
             out _,
-            out var levels);
+            out var levels,
+            out var contains);
 
-        var queryResult = UnityMcpConsoleLogBuffer.GetSnapshot(maxResults, includeStackTrace, levels);
-        return UnityMcpProtocol.CreateResult(idToken, CreateConsoleQueryResultPayload(queryResult, levels));
+        var queryResult = UnityMcpConsoleLogBuffer.GetSnapshot(maxResults, includeStackTrace, levels, contains);
+        return UnityMcpProtocol.CreateResult(idToken, CreateConsoleQueryResultPayload(queryResult, levels, contains));
     }
 
     private static string BuildConsoleTailResponse(JToken idToken, JObject root)
@@ -252,10 +256,11 @@ internal sealed class UnityMcpClient : IDisposable
             out var maxResults,
             out var includeStackTrace,
             out var afterSequence,
-            out var levels);
+            out var levels,
+            out var contains);
 
-        var queryResult = UnityMcpConsoleLogBuffer.GetTail(afterSequence, maxResults, includeStackTrace, levels);
-        return UnityMcpProtocol.CreateResult(idToken, CreateConsoleQueryResultPayload(queryResult, levels));
+        var queryResult = UnityMcpConsoleLogBuffer.GetTail(afterSequence, maxResults, includeStackTrace, levels, contains);
+        return UnityMcpProtocol.CreateResult(idToken, CreateConsoleQueryResultPayload(queryResult, levels, contains));
     }
 
     private static string BuildSetPlayModeResponse(JToken idToken, bool shouldPlay)
@@ -312,41 +317,56 @@ internal sealed class UnityMcpClient : IDisposable
 
     private static string BuildGetSelectionResponse(JToken idToken)
     {
-        var selectedObjects = Selection.objects;
-        var items = new List<object>(selectedObjects.Length);
-        foreach (var selectedObject in selectedObjects)
+        return UnityMcpProtocol.CreateResult(idToken, BuildSelectionSummaryResult());
+    }
+
+    private static string BuildSelectObjectResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "scene.selectObject");
+        var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var targetObject = ResolveObjectByInstanceId(instanceId, "instanceId");
+
+        Selection.activeObject = targetObject;
+        Selection.objects = new[] { targetObject };
+
+        return UnityMcpProtocol.CreateResult(idToken, BuildSelectionSummaryResult());
+    }
+
+    private static string BuildSetSelectionResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "scene.setSelection");
+        if (!paramsObject.TryGetValue("instanceIds", out var instanceIdsToken) || instanceIdsToken is not JArray instanceIdsArray)
         {
-            if (selectedObject == null)
+            throw new ArgumentException("Parameter 'instanceIds' is required and must be an array of integers.");
+        }
+
+        var resolvedObjects = new List<UnityEngine.Object>(instanceIdsArray.Count);
+        var seen = new HashSet<int>();
+
+        foreach (var item in instanceIdsArray)
+        {
+            if (item.Type != JTokenType.Integer)
+            {
+                throw new ArgumentException("Parameter 'instanceIds' must contain only integers.");
+            }
+
+            var instanceId = item.Value<int?>();
+            if (!instanceId.HasValue)
+            {
+                throw new ArgumentException("Parameter 'instanceIds' must contain only integers.");
+            }
+
+            if (!seen.Add(instanceId.Value))
             {
                 continue;
             }
 
-            items.Add(CreateObjectSummary(selectedObject));
+            resolvedObjects.Add(ResolveObjectByInstanceId(instanceId.Value, "instanceIds"));
         }
 
-        var activeObject = Selection.activeObject;
-        object? activeObjectSummary = null;
-        if (activeObject != null)
-        {
-            activeObjectSummary = CreateObjectSummary(activeObject);
-        }
+        Selection.objects = resolvedObjects.ToArray();
 
-        var activeGameObject = Selection.activeGameObject;
-        object? activeGameObjectSummary = null;
-        if (activeGameObject != null)
-        {
-            activeGameObjectSummary = CreateObjectSummary(activeGameObject);
-        }
-
-        var result = new
-        {
-            count = items.Count,
-            activeObject = activeObjectSummary,
-            activeGameObject = activeGameObjectSummary,
-            items
-        };
-
-        return UnityMcpProtocol.CreateResult(idToken, result);
+        return UnityMcpProtocol.CreateResult(idToken, BuildSelectionSummaryResult());
     }
 
     private static string BuildCreateGameObjectResponse(JToken idToken, JObject root)
@@ -671,7 +691,8 @@ internal sealed class UnityMcpClient : IDisposable
 
     private static object CreateConsoleQueryResultPayload(
         UnityMcpConsoleLogBuffer.ConsoleLogQueryResult queryResult,
-        IReadOnlyList<string>? levels)
+        IReadOnlyList<string>? levels,
+        string? contains)
     {
         return new
         {
@@ -686,6 +707,7 @@ internal sealed class UnityMcpClient : IDisposable
             truncated = queryResult.Truncated,
             includeStackTrace = queryResult.IncludeStackTrace,
             levels = levels,
+            contains,
             items = queryResult.Items
         };
     }
@@ -699,12 +721,14 @@ internal sealed class UnityMcpClient : IDisposable
         out int maxResults,
         out bool includeStackTrace,
         out long afterSequence,
-        out List<string>? levels)
+        out List<string>? levels,
+        out string? contains)
     {
         maxResults = defaultMaxResults;
         includeStackTrace = defaultIncludeStackTrace;
         afterSequence = 0;
         levels = null;
+        contains = null;
 
         if (!root.TryGetValue("params", out var paramsToken) || paramsToken.Type == JTokenType.Null)
         {
@@ -759,6 +783,22 @@ internal sealed class UnityMcpClient : IDisposable
             levels = NormalizeConsoleLevels(parsedLevels);
         }
 
+        if (paramsObject.TryGetValue("contains", out var containsToken))
+        {
+            if (containsToken.Type != JTokenType.String)
+            {
+                throw new ArgumentException("Parameter 'contains' must be a string.");
+            }
+
+            var parsedContains = containsToken.Value<string>();
+            if (string.IsNullOrWhiteSpace(parsedContains))
+            {
+                throw new ArgumentException("Parameter 'contains' cannot be empty.");
+            }
+
+            contains = parsedContains!.Trim();
+        }
+
         if (requireAfterSequence)
         {
             if (!paramsObject.TryGetValue("afterSequence", out var afterSequenceToken) || afterSequenceToken.Type != JTokenType.Integer)
@@ -803,6 +843,124 @@ internal sealed class UnityMcpClient : IDisposable
         }
 
         return normalized;
+    }
+
+    private static object BuildSelectionSummaryResult()
+    {
+        var selectedObjects = Selection.objects;
+        var items = new List<object>(selectedObjects.Length);
+        foreach (var selectedObject in selectedObjects)
+        {
+            if (selectedObject == null)
+            {
+                continue;
+            }
+
+            items.Add(CreateObjectSummary(selectedObject));
+        }
+
+        var activeObject = Selection.activeObject;
+        object? activeObjectSummary = null;
+        if (activeObject != null)
+        {
+            activeObjectSummary = CreateObjectSummary(activeObject);
+        }
+
+        var activeGameObject = Selection.activeGameObject;
+        object? activeGameObjectSummary = null;
+        if (activeGameObject != null)
+        {
+            activeGameObjectSummary = CreateObjectSummary(activeGameObject);
+        }
+
+        return new
+        {
+            count = items.Count,
+            activeObject = activeObjectSummary,
+            activeGameObject = activeGameObjectSummary,
+            items
+        };
+    }
+
+    private static JObject RequireParamsObject(JObject root, string methodName)
+    {
+        if (!root.TryGetValue("params", out var paramsToken) || paramsToken is not JObject paramsObject)
+        {
+            throw new ArgumentException($"Method '{methodName}' expects params to be an object.");
+        }
+
+        return paramsObject;
+    }
+
+    private static int ParseRequiredIntegerParameter(JObject paramsObject, string parameterName)
+    {
+        if (!paramsObject.TryGetValue(parameterName, out var token) || token.Type != JTokenType.Integer)
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' is required and must be an integer.");
+        }
+
+        var value = token.Value<int?>();
+        if (!value.HasValue)
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' is required and must be an integer.");
+        }
+
+        return value.Value;
+    }
+
+    private static UnityEngine.Object ResolveObjectByInstanceId(int instanceId, string parameterName)
+    {
+        var resolved = TryResolveObjectByEntityId(instanceId) ?? ResolveObjectByLegacyInstanceId(instanceId);
+        if (resolved == null)
+        {
+            throw new ArgumentException($"No Unity object found for instanceId {instanceId}.", parameterName);
+        }
+
+        return resolved;
+    }
+
+    private static UnityEngine.Object? TryResolveObjectByEntityId(int instanceId)
+    {
+        try
+        {
+            var editorUtilityType = typeof(EditorUtility);
+            var intMethod = editorUtilityType.GetMethod(
+                "EntityIdToObject",
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(int) },
+                modifiers: null);
+
+            if (intMethod != null)
+            {
+                return intMethod.Invoke(null, new object[] { instanceId }) as UnityEngine.Object;
+            }
+
+            var longMethod = editorUtilityType.GetMethod(
+                "EntityIdToObject",
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(long) },
+                modifiers: null);
+
+            if (longMethod != null)
+            {
+                return longMethod.Invoke(null, new object[] { (long)instanceId }) as UnityEngine.Object;
+            }
+        }
+        catch
+        {
+            // Fall back to the legacy API if the newer API is unavailable or throws.
+        }
+
+        return null;
+    }
+
+    private static UnityEngine.Object? ResolveObjectByLegacyInstanceId(int instanceId)
+    {
+#pragma warning disable CS0618 // Unity 6 deprecates InstanceIDToObject in favor of EntityIdToObject.
+        return EditorUtility.InstanceIDToObject(instanceId);
+#pragma warning restore CS0618
     }
 
     private static Vector3 ParsePosition(JToken positionToken)

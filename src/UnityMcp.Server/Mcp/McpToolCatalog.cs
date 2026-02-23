@@ -35,6 +35,11 @@ public sealed class McpToolCatalog
                             ["type"] = "boolean",
                             ["description"] = "Whether to include stack traces in each entry (default false)."
                         },
+                        ["contains"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["description"] = "Optional case-insensitive substring filter applied to log messages."
+                        },
                         ["levels"] = new JsonObject
                         {
                             ["type"] = "array",
@@ -74,6 +79,11 @@ public sealed class McpToolCatalog
                             ["type"] = "boolean",
                             ["description"] = "Whether to include stack traces in each entry (default false)."
                         },
+                        ["contains"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["description"] = "Optional case-insensitive substring filter applied to log messages."
+                        },
                         ["levels"] = new JsonObject
                         {
                             ["type"] = "array",
@@ -105,6 +115,44 @@ public sealed class McpToolCatalog
                 "scene.getSelection",
                 "Returns metadata for the current Unity Editor selection.",
                 EmptyObjectSchema()),
+            new McpToolDefinition(
+                "scene.selectObject",
+                "Selects a single Unity object by instance id.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceId"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Unity instance id of the object to select."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
+                "scene.setSelection",
+                "Replaces the Unity Editor selection with the specified object instance ids.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceIds"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceIds"] = new JsonObject
+                        {
+                            ["type"] = "array",
+                            ["description"] = "Unity instance ids to set as the current selection (duplicates ignored).",
+                            ["items"] = new JsonObject
+                            {
+                                ["type"] = "integer"
+                            }
+                        }
+                    }
+                }),
             new McpToolDefinition(
                 "scene.createGameObject",
                 "Creates a GameObject in the active scene and optionally sets its world position.",

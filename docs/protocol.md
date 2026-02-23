@@ -26,6 +26,7 @@
   - Params:
     - `maxResults` (optional, integer, `1..500`, default `100`)
     - `includeStackTrace` (optional, boolean, default `false`)
+    - `contains` (optional, case-insensitive substring filter applied to log messages)
     - `levels` (optional, string array filter; allowed values: `info`, `warning`, `error`, `assert`, `exception`; aliases `log`->`info`, `warn`->`warning`)
   - Returns:
     - `bufferCapacity`
@@ -35,6 +36,7 @@
     - `nextAfterSequence`
     - `returnedCount`
     - `truncated`
+    - `contains`
     - `items[]` (log entries with `sequence`, `timestampUtc`, `logType`, `level`, `message`, optional `stackTrace`)
 - `editor.consoleTail`
   - Returns captured log entries after a given sequence cursor (poll-based tail).
@@ -42,6 +44,7 @@
     - `afterSequence` (required, non-negative integer)
     - `maxResults` (optional, integer, `1..500`, default `100`)
     - `includeStackTrace` (optional, boolean, default `false`)
+    - `contains` (optional, case-insensitive substring filter applied to log messages)
     - `levels` (optional, string array filter; allowed values: `info`, `warning`, `error`, `assert`, `exception`; aliases `log`->`info`, `warn`->`warning`)
   - Returns:
     - `afterSequence`
@@ -92,6 +95,18 @@
     - `activeObject`
     - `activeGameObject`
     - `items[]` (selection object summaries)
+- `scene.selectObject`
+  - Selects a single Unity object by `instanceId`.
+  - Params:
+    - `instanceId` (required, integer)
+  - Returns:
+    - same payload shape as `scene.getSelection`
+- `scene.setSelection`
+  - Replaces the current Unity Editor selection with the specified `instanceId`s.
+  - Params:
+    - `instanceIds` (required, integer array; duplicates ignored)
+  - Returns:
+    - same payload shape as `scene.getSelection`
 - `scene.findByTag`
   - Finds active loaded `GameObject`s matching a tag.
   - Params:
@@ -131,6 +146,10 @@
     - `maxResults`
     - `truncated`
     - `items[]` (asset summaries)
+      - each item additionally includes:
+        - `assetImporterType`
+        - `labels`
+        - `fileExtension`
 
 ## Request Example
 ```json
@@ -220,6 +239,7 @@ Request:
   "params": {
     "maxResults": 50,
     "includeStackTrace": false,
+    "contains": "Reference",
     "levels": ["warning", "error"]
   }
 }
@@ -241,6 +261,7 @@ Success response (example):
     "returnedCount": 12,
     "truncated": false,
     "includeStackTrace": false,
+    "contains": "Reference",
     "levels": ["warning", "error"],
     "items": [
       {
@@ -413,6 +434,32 @@ Request:
 }
 ```
 
+## `scene.selectObject` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 13,
+  "method": "scene.selectObject",
+  "params": {
+    "instanceId": 45458
+  }
+}
+```
+
+## `scene.setSelection` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 14,
+  "method": "scene.setSelection",
+  "params": {
+    "instanceIds": [45458, 45459]
+  }
+}
+```
+
 Success response (example):
 ```json
 {
@@ -529,7 +576,10 @@ Success response (example):
         "assetPath": "Assets/Prefabs/Player.prefab",
         "isFolder": false,
         "mainAssetType": "UnityEngine.GameObject",
-        "mainAssetName": "Player"
+        "mainAssetName": "Player",
+        "assetImporterType": "UnityEditor.ModelImporter",
+        "labels": ["Gameplay"],
+        "fileExtension": ".prefab"
       }
     ]
   }
@@ -582,6 +632,9 @@ Success response (example):
   - repeated `level` values are supported and normalized:
     - `unitymcp://editor/console-logs?level=warning&level=error`
     - `unitymcp://editor/console-tail/125?level=error`
+  - `contains` is supported for case-insensitive message substring filtering:
+    - `unitymcp://editor/console-logs?contains=MissingReference`
+    - `unitymcp://editor/console-tail/125?contains=NullReference`
 - `unitymcp://assets/find/{query}` resource template supports optional query params:
   - `maxResults` (single integer)
   - repeated `folder` (maps to `searchInFolders`)

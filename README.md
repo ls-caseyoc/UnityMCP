@@ -22,6 +22,8 @@ MVP foundation for a local MCP relay server and Unity Editor package that let Co
   - `scene.getActiveScene`
   - `scene.listOpenScenes`
   - `scene.getSelection`
+  - `scene.selectObject`
+  - `scene.setSelection`
   - `scene.createGameObject`
   - `scene.findByTag`
   - `assets.find`
@@ -153,6 +155,8 @@ Default endpoint:
    - `scene.getActiveScene`
    - `scene.listOpenScenes`
    - `scene.getSelection`
+   - `scene.selectObject`
+   - `scene.setSelection`
    - `scene.createGameObject`
    - `scene.findByTag`
    - `assets.find`
@@ -220,8 +224,10 @@ Current MCP resource templates:
 Resource query parameter support (MVP):
 - `unitymcp://editor/console-logs?maxResults=20&includeStackTrace=true`
 - `unitymcp://editor/console-logs?level=warning&level=error`
+- `unitymcp://editor/console-logs?contains=MissingReference`
 - `unitymcp://editor/console-tail/125?maxResults=10&includeStackTrace=false`
 - `unitymcp://editor/console-tail/125?level=error&includeStackTrace=true`
+- `unitymcp://editor/console-tail/125?contains=NullReference`
 - `unitymcp://assets/find/Player?maxResults=25&folder=Assets/Prefabs&type=Prefab&label=Gameplay`
 - `unitymcp://scene/selection/index/0`
 
@@ -242,7 +248,3 @@ Example direct relay `/ws/cli` request:
 - Local-only MVP (no auth/TLS yet)
 - Single Unity connection
 - Domain reloads can interrupt the connection; the package reconnect loop handles recovery attempts
-
-## Next Thin Slices
-- Token auth/handshake for non-localhost scenarios
-- Optional async event notifications (play mode transitions, build/test progress)
