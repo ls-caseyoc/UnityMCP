@@ -174,6 +174,27 @@ public sealed class McpToolCatalog
                     }
                 }),
             new McpToolDefinition(
+                "scene.pingObject",
+                "Pings/highlights a Unity object in the Editor by instance id without changing selection.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceId"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Unity instance id of the object to ping."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
+                "scene.frameSelection",
+                "Best-effort frames the current Unity Editor selection in the Scene view.",
+                EmptyObjectSchema()),
+            new McpToolDefinition(
                 "scene.createGameObject",
                 "Creates a GameObject in the active scene and optionally sets its world position.",
                 new JsonObject

@@ -99,14 +99,34 @@
   - Selects a single Unity object by `instanceId`.
   - Params:
     - `instanceId` (required, integer)
+    - `ping` (optional, boolean)
+    - `focus` (optional, boolean)
   - Returns:
     - same payload shape as `scene.getSelection`
 - `scene.setSelection`
   - Replaces the current Unity Editor selection with the specified `instanceId`s.
   - Params:
     - `instanceIds` (required, integer array; duplicates ignored)
+    - `ping` (optional, boolean)
+    - `focus` (optional, boolean)
   - Returns:
     - same payload shape as `scene.getSelection`
+- `scene.pingObject`
+  - Pings/highlights a Unity object in the Editor without changing selection.
+  - Params:
+    - `instanceId` (required, integer)
+  - Returns:
+    - `pinged`
+    - `instanceId`
+    - `target` (object summary)
+- `scene.frameSelection`
+  - Best-effort frames the current selection in the Scene view.
+  - Returns:
+    - `framed`
+    - `selectionCount`
+    - `hasSceneSelection`
+    - `sceneViewAvailable`
+    - `activeObject`
 - `scene.findByTag`
   - Finds active loaded `GameObject`s matching a tag.
   - Params:
@@ -187,7 +207,7 @@ Request:
 }
 ```
 
-Success response (example):
+`scene.frameSelection` success response (example):
 ```json
 {
   "jsonrpc": "2.0",
@@ -213,7 +233,7 @@ Request:
 }
 ```
 
-Success response (example):
+`scene.selectObject` / `scene.setSelection` success response (example):
 ```json
 {
   "jsonrpc": "2.0",
@@ -468,6 +488,48 @@ Request:
     "instanceIds": [45458, 45459],
     "ping": true,
     "focus": true
+  }
+}
+```
+
+## `scene.pingObject` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 15,
+  "method": "scene.pingObject",
+  "params": {
+    "instanceId": 45458
+  }
+}
+```
+
+## `scene.frameSelection` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "method": "scene.frameSelection"
+}
+```
+
+Success response (example):
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 16,
+  "result": {
+    "framed": true,
+    "selectionCount": 1,
+    "hasSceneSelection": true,
+    "sceneViewAvailable": true,
+    "activeObject": {
+      "instanceId": 45458,
+      "name": "Cube",
+      "unityType": "UnityEngine.GameObject"
+    }
   }
 }
 ```

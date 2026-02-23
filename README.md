@@ -24,6 +24,8 @@ MVP foundation for a local MCP relay server and Unity Editor package that let Co
   - `scene.getSelection`
   - `scene.selectObject`
   - `scene.setSelection`
+  - `scene.pingObject`
+  - `scene.frameSelection`
   - `scene.createGameObject`
   - `scene.findByTag`
   - `assets.find`
@@ -157,6 +159,8 @@ Default endpoint:
    - `scene.getSelection`
    - `scene.selectObject`
    - `scene.setSelection`
+   - `scene.pingObject`
+   - `scene.frameSelection`
    - `scene.createGameObject`
    - `scene.findByTag`
    - `assets.find`
@@ -165,6 +169,8 @@ Default endpoint:
 
 Selection tool note:
 - `scene.selectObject` / `scene.setSelection` support optional `ping` and `focus` booleans to highlight and frame the selection in the Unity Editor.
+- `scene.pingObject` pings/highlights an object by `instanceId` without changing selection.
+- `scene.frameSelection` frames the current selection in the Scene view (best effort).
 
 Example MCP `initialize` request:
 ```json

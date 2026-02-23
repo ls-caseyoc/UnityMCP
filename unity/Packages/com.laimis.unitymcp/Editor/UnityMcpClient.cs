@@ -191,6 +191,8 @@ internal sealed class UnityMcpClient : IDisposable
                 "scene.getSelection" => BuildGetSelectionResponse(idToken),
                 "scene.selectObject" => BuildSelectObjectResponse(idToken, root),
                 "scene.setSelection" => BuildSetSelectionResponse(idToken, root),
+                "scene.pingObject" => BuildPingObjectResponse(idToken, root),
+                "scene.frameSelection" => BuildFrameSelectionResponse(idToken),
                 "scene.createGameObject" => BuildCreateGameObjectResponse(idToken, root),
                 "scene.findByTag" => BuildFindByTagResponse(idToken, root),
                 "assets.find" => BuildFindAssetsResponse(idToken, root),
@@ -373,6 +375,44 @@ internal sealed class UnityMcpClient : IDisposable
         ApplySelectionEditorPresentation(Selection.activeObject, ping, focus);
 
         return UnityMcpProtocol.CreateResult(idToken, BuildSelectionSummaryResult());
+    }
+
+    private static string BuildPingObjectResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "scene.pingObject");
+        var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var targetObject = ResolveObjectByInstanceId(instanceId, "instanceId");
+
+        EditorGUIUtility.PingObject(targetObject);
+
+        var result = new
+        {
+            pinged = true,
+            instanceId,
+            target = CreateObjectSummary(targetObject)
+        };
+
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
+    private static string BuildFrameSelectionResponse(JToken idToken)
+    {
+        var selectionCount = Selection.objects.Length;
+        var activeObject = Selection.activeObject;
+        var hasSceneSelection = Selection.activeTransform != null || Selection.activeGameObject != null;
+        var sceneViewAvailable = SceneView.lastActiveSceneView != null;
+        var framed = hasSceneSelection && sceneViewAvailable && TryFrameSelectionInSceneView();
+
+        var result = new
+        {
+            framed,
+            selectionCount,
+            hasSceneSelection,
+            sceneViewAvailable,
+            activeObject = activeObject != null ? CreateObjectSummary(activeObject) : null
+        };
+
+        return UnityMcpProtocol.CreateResult(idToken, result);
     }
 
     private static string BuildCreateGameObjectResponse(JToken idToken, JObject root)
@@ -1008,13 +1048,37 @@ internal sealed class UnityMcpClient : IDisposable
             return;
         }
 
+        _ = TryFrameSelectionInSceneView();
+    }
+
+    private static bool TryFrameSelectionInSceneView()
+    {
         try
         {
-            SceneView.lastActiveSceneView?.FrameSelected();
+            var sceneView = SceneView.lastActiveSceneView;
+            if (sceneView == null)
+            {
+                return false;
+            }
+
+            // Unity versions differ on the exact return type; handle bool/void via reflection.
+            var method = typeof(SceneView).GetMethod("FrameSelected", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
+            if (method == null)
+            {
+                return false;
+            }
+
+            var result = method.Invoke(sceneView, null);
+            return result switch
+            {
+                bool boolResult => boolResult,
+                _ => true
+            };
         }
         catch
         {
             // Best-effort editor UX enhancement; selection change itself already succeeded.
+            return false;
         }
     }
 
