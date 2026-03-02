@@ -130,6 +130,14 @@ public sealed class McpRequestHandlerTests
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.frameSelection");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.frameObject");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.createGameObject");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.setParent");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.duplicateObject");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.renameObject");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "scene.setActive");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "prefab.instantiate");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "prefab.getSource");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "prefab.applyOverrides");
+        Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "prefab.revertOverrides");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "assets.find");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "assets.import");
         Assert.Contains(tools.EnumerateArray(), tool => tool.GetProperty("name").GetString() == "assets.ping");
@@ -170,6 +178,41 @@ public sealed class McpRequestHandlerTests
         Assert.Equal("object", xDrive.GetProperty("type").GetString());
         Assert.True(configurableProperties.TryGetProperty("projectionMode", out _));
         Assert.True(configurableProperties.TryGetProperty("connectedAnchorMode", out _));
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ReturnsHierarchyAndPrefabToolSchemas_WhenRequested()
+    {
+        // Arrange
+        var handler = CreateHandler((_, _, _) => throw new InvalidOperationException("Relay should not be called."));
+        const string requestJson = """{"jsonrpc":"2.0","id":"list-schema-2","method":"tools/list"}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        using var document = JsonDocument.Parse(response.Body!);
+        var tools = document.RootElement.GetProperty("result").GetProperty("tools");
+
+        var setParent = tools.EnumerateArray().First(tool => tool.GetProperty("name").GetString() == "scene.setParent");
+        var setParentProperties = setParent.GetProperty("inputSchema").GetProperty("properties");
+        var parentInstanceIdTypes = setParentProperties.GetProperty("parentInstanceId").GetProperty("type").EnumerateArray().Select(item => item.GetString()).ToArray();
+        Assert.Contains("integer", parentInstanceIdTypes);
+        Assert.Contains("null", parentInstanceIdTypes);
+        Assert.Equal("boolean", setParentProperties.GetProperty("keepWorldTransform").GetProperty("type").GetString());
+
+        var instantiatePrefab = tools.EnumerateArray().First(tool => tool.GetProperty("name").GetString() == "prefab.instantiate");
+        var instantiateProperties = instantiatePrefab.GetProperty("inputSchema").GetProperty("properties");
+        Assert.Equal("string", instantiateProperties.GetProperty("assetPath").GetProperty("type").GetString());
+        Assert.Equal("boolean", instantiateProperties.GetProperty("select").GetProperty("type").GetString());
+        Assert.Equal(3, instantiateProperties.GetProperty("rotationEuler").GetProperty("minItems").GetInt32());
+
+        var applyOverrides = tools.EnumerateArray().First(tool => tool.GetProperty("name").GetString() == "prefab.applyOverrides");
+        var applyProperties = applyOverrides.GetProperty("inputSchema").GetProperty("properties");
+        var scopeValues = applyProperties.GetProperty("scope").GetProperty("enum").EnumerateArray().Select(item => item.GetString()).ToArray();
+        Assert.Equal(new[] { "instanceRoot", "object", "component" }, scopeValues);
+        Assert.Equal("integer", applyProperties.GetProperty("componentInstanceId").GetProperty("type").GetString());
     }
 
     [Fact]
@@ -2040,6 +2083,242 @@ public sealed class McpRequestHandlerTests
 
         using var document = JsonDocument.Parse(response.Body!);
         Assert.False(document.RootElement.GetProperty("result").GetProperty("isError").GetBoolean());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsSceneSetParent()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"keepWorldTransform":true,"applied":{"reparented":true}}}""");
+        });
+
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"set-parent-1","method":"tools/call","params":{"name":"scene.setParent","arguments":{"instanceId":45444,"parentInstanceId":null,"keepWorldTransform":true,"ping":true,"focus":false}}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        var forwardedParams = forwarded.RootElement.GetProperty("params");
+        Assert.Equal("scene.setParent", forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal(45444, forwardedParams.GetProperty("instanceId").GetInt32());
+        Assert.Equal(JsonValueKind.Null, forwardedParams.GetProperty("parentInstanceId").ValueKind);
+        Assert.True(forwardedParams.GetProperty("keepWorldTransform").GetBoolean());
+        Assert.True(forwardedParams.GetProperty("ping").GetBoolean());
+        Assert.False(forwardedParams.GetProperty("focus").GetBoolean());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsSceneDuplicateObject()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"applied":{"selected":true}}}""");
+        });
+
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"duplicate-1","method":"tools/call","params":{"name":"scene.duplicateObject","arguments":{"instanceId":45444,"select":false,"ping":true,"focus":true}}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        var forwardedParams = forwarded.RootElement.GetProperty("params");
+        Assert.Equal("scene.duplicateObject", forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal(45444, forwardedParams.GetProperty("instanceId").GetInt32());
+        Assert.False(forwardedParams.GetProperty("select").GetBoolean());
+        Assert.True(forwardedParams.GetProperty("ping").GetBoolean());
+        Assert.True(forwardedParams.GetProperty("focus").GetBoolean());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsSceneRenameObject()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"previousName":"Old","currentName":"New"}}""");
+        });
+
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"rename-1","method":"tools/call","params":{"name":"scene.renameObject","arguments":{"instanceId":45444,"name":"Enemy Clone"}}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        var forwardedParams = forwarded.RootElement.GetProperty("params");
+        Assert.Equal("scene.renameObject", forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal(45444, forwardedParams.GetProperty("instanceId").GetInt32());
+        Assert.Equal("Enemy Clone", forwardedParams.GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsSceneSetActive()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"activeSelf":false,"activeInHierarchy":false}}""");
+        });
+
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"active-1","method":"tools/call","params":{"name":"scene.setActive","arguments":{"instanceId":45444,"active":false}}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        var forwardedParams = forwarded.RootElement.GetProperty("params");
+        Assert.Equal("scene.setActive", forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal(45444, forwardedParams.GetProperty("instanceId").GetInt32());
+        Assert.False(forwardedParams.GetProperty("active").GetBoolean());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsPrefabInstantiate()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"instance":{"instanceId":7001},"prefabSource":{"assetPath":"Assets/Prefabs/Test.prefab"}}}""");
+        });
+
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"prefab-instantiate-1","method":"tools/call","params":{"name":"prefab.instantiate","arguments":{"assetPath":"Assets/Prefabs/Test.prefab","parentInstanceId":45444,"position":[1,2,3],"rotationEuler":[0,90,0],"select":true,"ping":true,"focus":false}}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        var forwardedParams = forwarded.RootElement.GetProperty("params");
+        Assert.Equal("prefab.instantiate", forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal("Assets/Prefabs/Test.prefab", forwardedParams.GetProperty("assetPath").GetString());
+        Assert.Equal(45444, forwardedParams.GetProperty("parentInstanceId").GetInt32());
+        Assert.Equal(3, forwardedParams.GetProperty("position").GetArrayLength());
+        Assert.Equal(3, forwardedParams.GetProperty("rotationEuler").GetArrayLength());
+        Assert.True(forwardedParams.GetProperty("select").GetBoolean());
+        Assert.True(forwardedParams.GetProperty("ping").GetBoolean());
+        Assert.False(forwardedParams.GetProperty("focus").GetBoolean());
+    }
+
+    [Fact]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsPrefabGetSource()
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"prefabInstanceStatus":"Connected","sourceAsset":{"assetPath":"Assets/Prefabs/Test.prefab"}}}""");
+        });
+
+        const string requestJson =
+            """{"jsonrpc":"2.0","id":"prefab-source-1","method":"tools/call","params":{"name":"prefab.getSource","arguments":{"instanceId":45444}}}""";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        Assert.Equal("prefab.getSource", forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal(45444, forwarded.RootElement.GetProperty("params").GetProperty("instanceId").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("prefab.applyOverrides", "apply-overrides-1", "instanceRoot")]
+    [InlineData("prefab.revertOverrides", "revert-overrides-1", "instanceRoot")]
+    [InlineData("prefab.applyOverrides", "apply-overrides-2", "object")]
+    [InlineData("prefab.revertOverrides", "revert-overrides-2", "object")]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsPrefabNonComponentOverrideScope(
+        string toolName,
+        string requestId,
+        string scope)
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult($"{{\"jsonrpc\":\"2.0\",\"id\":\"mcp-1\",\"result\":{{\"scope\":\"{scope}\",\"applied\":{{\"scope\":\"{scope}\"}}}}}}");
+        });
+
+        var requestJson =
+            $"{{\"jsonrpc\":\"2.0\",\"id\":\"{requestId}\",\"method\":\"tools/call\",\"params\":{{\"name\":\"{toolName}\",\"arguments\":{{\"instanceId\":45444,\"scope\":\"{scope}\"}}}}}}";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        var forwardedParams = forwarded.RootElement.GetProperty("params");
+        Assert.Equal(toolName, forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal(45444, forwardedParams.GetProperty("instanceId").GetInt32());
+        Assert.Equal(scope, forwardedParams.GetProperty("scope").GetString());
+    }
+
+    [Theory]
+    [InlineData("prefab.applyOverrides", "apply-overrides-3")]
+    [InlineData("prefab.revertOverrides", "revert-overrides-3")]
+    public async Task HandlePostAsync_ForwardsUnityRequest_WhenToolCallTargetsPrefabComponentOverrideScope(
+        string toolName,
+        string requestId)
+    {
+        // Arrange
+        string? forwardedRequestJson = null;
+        var handler = CreateHandler((requestJson, _, _) =>
+        {
+            forwardedRequestJson = requestJson;
+            return Task.FromResult("""{"jsonrpc":"2.0","id":"mcp-1","result":{"scope":"component","applied":{"scope":"component","componentInstanceId":45445}}}""");
+        });
+
+        var requestJson =
+            $"{{\"jsonrpc\":\"2.0\",\"id\":\"{requestId}\",\"method\":\"tools/call\",\"params\":{{\"name\":\"{toolName}\",\"arguments\":{{\"instanceId\":45444,\"scope\":\"component\",\"componentInstanceId\":45445}}}}}}";
+
+        // Act
+        var response = await handler.HandlePostAsync(requestJson, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(200, response.StatusCode);
+        Assert.NotNull(forwardedRequestJson);
+        using var forwarded = JsonDocument.Parse(forwardedRequestJson!);
+        var forwardedParams = forwarded.RootElement.GetProperty("params");
+        Assert.Equal(toolName, forwarded.RootElement.GetProperty("method").GetString());
+        Assert.Equal(45444, forwardedParams.GetProperty("instanceId").GetInt32());
+        Assert.Equal("component", forwardedParams.GetProperty("scope").GetString());
+        Assert.Equal(45445, forwardedParams.GetProperty("componentInstanceId").GetInt32());
     }
 
     [Fact]

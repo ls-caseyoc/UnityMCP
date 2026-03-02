@@ -71,6 +71,55 @@
     - `scenePath`
     - `hierarchyPath`
     - `position`
+- `scene.setParent`
+  - Reparents a scene object under another scene object, or unparents it to the scene root.
+  - Params:
+    - `instanceId` (required, integer; `GameObject` or `Component`, resolved to owner `GameObject`)
+    - `parentInstanceId` (optional, integer or `null`; `null` or omitted unparents to the scene root)
+    - `keepWorldTransform` (optional, boolean, default `true`)
+    - `ping` (optional, boolean)
+    - `focus` (optional, boolean)
+  - Notes:
+    - Rejects self-parenting, cyclic parenting, and cross-scene parenting.
+    - Selects the moved object after success.
+  - Returns:
+    - `target`
+    - `parent`
+    - `keepWorldTransform`
+    - `selection`
+    - `applied`
+- `scene.duplicateObject`
+  - Duplicates a scene object using Unity Undo-aware scene duplication semantics.
+  - Params:
+    - `instanceId` (required, integer; `GameObject` or `Component`, resolved to owner `GameObject`)
+    - `select` (optional, boolean, default `true`)
+    - `ping` (optional, boolean)
+    - `focus` (optional, boolean)
+  - Returns:
+    - `source`
+    - `duplicate`
+    - `selection`
+    - `applied`
+- `scene.renameObject`
+  - Renames a scene `GameObject`.
+  - Params:
+    - `instanceId` (required, integer; `GameObject` or `Component`, resolved to owner `GameObject`)
+    - `name` (required, non-empty string)
+  - Returns:
+    - `target`
+    - `previousName`
+    - `currentName`
+    - `applied`
+- `scene.setActive`
+  - Toggles active state of a scene object.
+  - Params:
+    - `instanceId` (required, integer; `GameObject` or `Component`, resolved to owner `GameObject`)
+    - `active` (required, boolean)
+  - Returns:
+    - `target`
+    - `activeSelf`
+    - `activeInHierarchy`
+    - `applied`
 - `scene.getActiveScene`
   - Returns metadata for the currently active scene.
   - Returns:
@@ -364,6 +413,55 @@
     - `target`
     - `addedComponent`
     - `componentCount`
+- `prefab.instantiate`
+  - Instantiates a prefab asset into the active scene.
+  - Params:
+    - `assetPath` (required, string; prefab asset path under `Assets/`)
+    - `parentInstanceId` (optional, integer or `null`)
+    - `position` (optional `[x,y,z]`, world-space)
+    - `rotationEuler` (optional `[x,y,z]`, world-space euler)
+    - `select` (optional, boolean, default `true`)
+    - `ping` (optional, boolean)
+    - `focus` (optional, boolean)
+  - Notes:
+    - Parent targets must be scene objects in the active loaded scene.
+  - Returns:
+    - `instance`
+    - `prefabSource`
+    - `selection`
+    - `applied`
+- `prefab.getSource`
+  - Resolves prefab source metadata for a prefab instance object in a scene.
+  - Params:
+    - `instanceId` (required, integer)
+  - Returns:
+    - `target`
+    - `prefabInstanceStatus`
+    - `prefabAssetType`
+    - `instanceRoot`
+    - `sourceAsset`
+    - `nearestPrefabInstanceRoot`
+    - `isOutermostPrefabInstanceRoot`
+- `prefab.applyOverrides`
+  - Applies prefab overrides from a scene prefab instance back to the source prefab asset.
+  - Params:
+    - `instanceId` (required, integer)
+    - `scope` (optional, enum string: `instanceRoot`, `object`, `component`; default `instanceRoot`)
+    - `componentInstanceId` (optional, integer; required for `component` scope unless `instanceId` already resolves to a `Component`)
+  - Returns:
+    - `target`
+    - `scope`
+    - `prefabSource`
+    - `applied`
+- `prefab.revertOverrides`
+  - Reverts prefab overrides on a scene prefab instance.
+  - Params:
+    - same as `prefab.applyOverrides`
+  - Returns:
+    - `target`
+    - `scope`
+    - `prefabSource`
+    - `applied`
 - `scene.setSelection`
   - Replaces the current Unity Editor selection with the specified `instanceId`s.
   - Params:
@@ -512,6 +610,158 @@ Request:
     "scenePath": "Assets/Scenes/SampleScene.unity",
     "hierarchyPath": "EnemySpawnPoint",
     "position": [0, 1.5, 0]
+  }
+}
+```
+
+## `scene.setParent` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "method": "scene.setParent",
+  "params": {
+    "instanceId": 45501,
+    "parentInstanceId": 45458,
+    "keepWorldTransform": true,
+    "ping": true
+  }
+}
+```
+
+## `scene.duplicateObject` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 22,
+  "method": "scene.duplicateObject",
+  "params": {
+    "instanceId": 45458,
+    "select": true
+  }
+}
+```
+
+## `scene.renameObject` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 23,
+  "method": "scene.renameObject",
+  "params": {
+    "instanceId": 45458,
+    "name": "Enemy Spawn Root"
+  }
+}
+```
+
+## `scene.setActive` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 24,
+  "method": "scene.setActive",
+  "params": {
+    "instanceId": 45458,
+    "active": false
+  }
+}
+```
+
+## `prefab.instantiate` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 25,
+  "method": "prefab.instantiate",
+  "params": {
+    "assetPath": "Assets/Prefabs/Enemy.prefab",
+    "parentInstanceId": 45458,
+    "position": [0, 1, 0],
+    "rotationEuler": [0, 180, 0],
+    "select": true
+  }
+}
+```
+
+## `prefab.getSource` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 26,
+  "method": "prefab.getSource",
+  "params": {
+    "instanceId": 45520
+  }
+}
+```
+
+Success response (example):
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 26,
+  "result": {
+    "target": {
+      "instanceId": 45520,
+      "name": "Enemy",
+      "unityType": "UnityEngine.GameObject"
+    },
+    "prefabInstanceStatus": "Connected",
+    "prefabAssetType": "Regular",
+    "instanceRoot": {
+      "instanceId": 45520,
+      "name": "Enemy",
+      "unityType": "UnityEngine.GameObject"
+    },
+    "sourceAsset": {
+      "name": "Enemy",
+      "assetPath": "Assets/Prefabs/Enemy.prefab",
+      "guid": "0123456789abcdef0123456789abcdef",
+      "prefabInstanceStatus": "Connected",
+      "prefabAssetType": "Regular"
+    },
+    "nearestPrefabInstanceRoot": {
+      "instanceId": 45520,
+      "name": "Enemy",
+      "unityType": "UnityEngine.GameObject"
+    },
+    "isOutermostPrefabInstanceRoot": true
+  }
+}
+```
+
+## `prefab.applyOverrides` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 27,
+  "method": "prefab.applyOverrides",
+  "params": {
+    "instanceId": 45520,
+    "scope": "component",
+    "componentInstanceId": 45521
+  }
+}
+```
+
+## `prefab.revertOverrides` Example
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 28,
+  "method": "prefab.revertOverrides",
+  "params": {
+    "instanceId": 45520,
+    "scope": "instanceRoot"
   }
 }
 ```
@@ -1713,6 +1963,9 @@ Success response (example):
 - `scene.findByTag` currently returns active objects only (`GameObject.FindGameObjectsWithTag`).
 - Play mode control responses are immediate and do not wait for transition completion.
 - `assets.import` currently supports only existing project-relative paths under `Assets/`.
+- `scene.setParent` rejects cross-scene parenting, self-parenting, and cyclic parenting.
+- `prefab.instantiate` currently targets prefab assets by `assetPath` and only supports parenting into the active loaded scene.
+- `prefab.applyOverrides` / `prefab.revertOverrides` support only explicit `instanceRoot`, `object`, and `component` scopes; unsupported target/scope combinations fail instead of widening scope.
 - Console log history is captured in-memory by the Unity package (bounded buffer) and resets on domain reload/editor restart.
 
 ## Resource URI Query Parameters (MVP)

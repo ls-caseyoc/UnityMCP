@@ -1218,6 +1218,200 @@ public sealed class McpToolCatalog
                     }
                 }),
             new McpToolDefinition(
+                "scene.setParent",
+                "Reparents a scene object under another scene object or unparents it to the scene root.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceId"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Unity instance id of the scene object or component to reparent."
+                        },
+                        ["parentInstanceId"] = NullableIntegerSchema("Unity instance id of the new parent scene object or component, or null to unparent to the scene root."),
+                        ["keepWorldTransform"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Whether to preserve world position/rotation/scale during reparenting. Defaults to true."
+                        },
+                        ["ping"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Ping/highlight the moved object in the Editor after selection."
+                        },
+                        ["focus"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Best-effort frame the moved object in the Scene view after selection."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
+                "scene.duplicateObject",
+                "Duplicates a scene object.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceId"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Unity instance id of the scene object or component to duplicate."
+                        },
+                        ["select"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Whether to select the duplicate after creation. Defaults to true."
+                        },
+                        ["ping"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Ping/highlight the duplicate in the Editor."
+                        },
+                        ["focus"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Best-effort frame the duplicate in the Scene view."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
+                "scene.renameObject",
+                "Renames a scene GameObject.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceId", "name"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Unity instance id of the scene object or component to rename."
+                        },
+                        ["name"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["description"] = "New non-empty GameObject name."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
+                "scene.setActive",
+                "Toggles active state of a scene object.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceId", "active"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Unity instance id of the scene object or component to toggle."
+                        },
+                        ["active"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Whether the target GameObject should be active."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
+                "prefab.instantiate",
+                "Instantiates a prefab asset into the active scene.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("assetPath"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["assetPath"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["description"] = "Prefab asset path under Assets/."
+                        },
+                        ["parentInstanceId"] = NullableIntegerSchema("Optional parent scene object or component instance id, or null to leave the instance at the scene root."),
+                        ["position"] = Vector3Schema("Optional world position [x,y,z]."),
+                        ["rotationEuler"] = Vector3Schema("Optional world euler rotation [x,y,z]."),
+                        ["select"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Whether to select the instantiated object after creation. Defaults to true."
+                        },
+                        ["ping"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Ping/highlight the instantiated object in the Editor."
+                        },
+                        ["focus"] = new JsonObject
+                        {
+                            ["type"] = "boolean",
+                            ["description"] = "Optional. Best-effort frame the instantiated object in the Scene view."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
+                "prefab.getSource",
+                "Resolves prefab source metadata for a prefab instance in a scene.",
+                InstanceIdOnlySchema("Unity instance id of a prefab instance object or component in a scene.")),
+            new McpToolDefinition(
+                "prefab.applyOverrides",
+                "Applies prefab overrides from a scene prefab instance back to the prefab asset.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceId"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Unity instance id of a prefab instance object or component in a scene."
+                        },
+                        ["scope"] = PrefabScopeSchema(),
+                        ["componentInstanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Component instance id to target when scope is component. If omitted, a component instanceId input may be reused."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
+                "prefab.revertOverrides",
+                "Reverts prefab overrides on a scene prefab instance.",
+                new JsonObject
+                {
+                    ["type"] = "object",
+                    ["additionalProperties"] = false,
+                    ["required"] = new JsonArray("instanceId"),
+                    ["properties"] = new JsonObject
+                    {
+                        ["instanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Unity instance id of a prefab instance object or component in a scene."
+                        },
+                        ["scope"] = PrefabScopeSchema(),
+                        ["componentInstanceId"] = new JsonObject
+                        {
+                            ["type"] = "integer",
+                            ["description"] = "Component instance id to target when scope is component. If omitted, a component instanceId input may be reused."
+                        }
+                    }
+                }),
+            new McpToolDefinition(
                 "scene.findByTag",
                 "Finds active GameObjects with the specified Unity tag.",
                 new JsonObject
@@ -1456,6 +1650,16 @@ public sealed class McpToolCatalog
             ["type"] = "string",
             ["description"] = "Connection helper mode: preserve, auto, zero, or matchAnchor.",
             ["enum"] = new JsonArray("preserve", "auto", "zero", "matchAnchor")
+        };
+    }
+
+    private static JsonObject PrefabScopeSchema()
+    {
+        return new JsonObject
+        {
+            ["type"] = "string",
+            ["description"] = "Prefab override scope: instanceRoot, object, or component.",
+            ["enum"] = new JsonArray("instanceRoot", "object", "component")
         };
     }
 

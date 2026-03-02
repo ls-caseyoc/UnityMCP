@@ -52,6 +52,14 @@ MVP foundation for a local MCP relay server and Unity Editor package that let Co
   - `scene.frameSelection`
   - `scene.frameObject`
   - `scene.createGameObject`
+  - `scene.setParent`
+  - `scene.duplicateObject`
+  - `scene.renameObject`
+  - `scene.setActive`
+  - `prefab.instantiate`
+  - `prefab.getSource`
+  - `prefab.applyOverrides`
+  - `prefab.revertOverrides`
   - `scene.findByTag`
   - `assets.find`
   - `assets.import`
@@ -214,6 +222,14 @@ Default endpoint:
    - `scene.frameSelection`
    - `scene.frameObject`
    - `scene.createGameObject`
+   - `scene.setParent`
+   - `scene.duplicateObject`
+   - `scene.renameObject`
+   - `scene.setActive`
+   - `prefab.instantiate`
+   - `prefab.getSource`
+   - `prefab.applyOverrides`
+   - `prefab.revertOverrides`
    - `scene.findByTag`
    - `assets.find`
    - `assets.import`
@@ -228,7 +244,10 @@ Selection tool note:
 - `scene.frameSelection` frames the current selection in the Scene view (best effort).
 - `scene.frameObject` frames a specific scene object by `instanceId` (best effort) while preserving the previous selection when possible.
 - `scene.getComponents` / `scene.getComponentProperties` / `scene.setComponentProperties` / `scene.setTransform` / `scene.addComponent` enable basic component inspection and safe scene-object edits from MCP.
+- `scene.setParent` / `scene.duplicateObject` / `scene.renameObject` / `scene.setActive` add Undo-aware hierarchy editing and active-state workflows for scene objects.
 - `scene.destroyObject` deletes a scene `GameObject` or `Component` with Undo support (destroying `Transform` directly is rejected).
+- `prefab.instantiate` creates prefab instances by asset path, and `prefab.getSource` returns prefab source metadata for scene instances.
+- `prefab.applyOverrides` / `prefab.revertOverrides` support deterministic `instanceRoot`, `object`, and `component` scopes; unsupported target/scope combinations fail explicitly instead of widening scope.
 - Component property read/write uses a constrained serialized-property MVP (common simple types only; unsupported/non-editable properties fail clearly).
 - `camera.*` / `light.*` / `rigidbody.*` / `collider.*` provide direct API convenience wrappers (`getSettings` / `setSettings`) so you do not need serialized `m_*` field names for common workflows.
 - 2D physics convenience wrappers are also available:

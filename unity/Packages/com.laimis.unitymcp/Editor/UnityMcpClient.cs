@@ -38,6 +38,13 @@ internal sealed class UnityMcpClient : IDisposable
         MatchAnchor
     }
 
+    private enum PrefabOverrideScope
+    {
+        InstanceRoot,
+        Object,
+        Component
+    }
+
     private readonly struct OptionalInstanceIdParameter
     {
         public OptionalInstanceIdParameter(bool isSpecified, int? value)
@@ -51,6 +58,47 @@ internal sealed class UnityMcpClient : IDisposable
         public int? Value { get; }
 
         public bool HasValue => Value.HasValue;
+    }
+
+    private readonly struct PrefabInstanceDetails
+    {
+        public PrefabInstanceDetails(
+            GameObject targetGameObject,
+            GameObject nearestPrefabInstanceRoot,
+            GameObject outermostPrefabInstanceRoot,
+            GameObject sourceAsset,
+            string assetPath,
+            string guid,
+            string prefabInstanceStatus,
+            string prefabAssetType)
+        {
+            TargetGameObject = targetGameObject;
+            NearestPrefabInstanceRoot = nearestPrefabInstanceRoot;
+            OutermostPrefabInstanceRoot = outermostPrefabInstanceRoot;
+            SourceAsset = sourceAsset;
+            AssetPath = assetPath;
+            Guid = guid;
+            PrefabInstanceStatus = prefabInstanceStatus;
+            PrefabAssetType = prefabAssetType;
+        }
+
+        public GameObject TargetGameObject { get; }
+
+        public GameObject NearestPrefabInstanceRoot { get; }
+
+        public GameObject OutermostPrefabInstanceRoot { get; }
+
+        public GameObject SourceAsset { get; }
+
+        public string AssetPath { get; }
+
+        public string Guid { get; }
+
+        public string PrefabInstanceStatus { get; }
+
+        public string PrefabAssetType { get; }
+
+        public bool IsOutermostPrefabInstanceRoot => TargetGameObject == OutermostPrefabInstanceRoot;
     }
 
     private readonly struct SoftJointLimitUpdate
@@ -469,6 +517,14 @@ internal sealed class UnityMcpClient : IDisposable
                 "scene.frameSelection" => BuildFrameSelectionResponse(idToken),
                 "scene.frameObject" => BuildFrameObjectResponse(idToken, root),
                 "scene.createGameObject" => BuildCreateGameObjectResponse(idToken, root),
+                "scene.setParent" => BuildSetParentResponse(idToken, root),
+                "scene.duplicateObject" => BuildDuplicateObjectResponse(idToken, root),
+                "scene.renameObject" => BuildRenameObjectResponse(idToken, root),
+                "scene.setActive" => BuildSetActiveResponse(idToken, root),
+                "prefab.instantiate" => BuildInstantiatePrefabResponse(idToken, root),
+                "prefab.getSource" => BuildGetPrefabSourceResponse(idToken, root),
+                "prefab.applyOverrides" => BuildApplyPrefabOverridesResponse(idToken, root),
+                "prefab.revertOverrides" => BuildRevertPrefabOverridesResponse(idToken, root),
                 "scene.findByTag" => BuildFindByTagResponse(idToken, root),
                 "assets.find" => BuildFindAssetsResponse(idToken, root),
                 "assets.import" => BuildImportAssetResponse(idToken, root),
@@ -4405,6 +4461,300 @@ internal sealed class UnityMcpClient : IDisposable
         return UnityMcpProtocol.CreateResult(idToken, result);
     }
 
+    private static string BuildSetParentResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "scene.setParent");
+        var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var parentInstanceId = ParseOptionalNullableIntegerParameter(paramsObject, "parentInstanceId");
+        var keepWorldTransform = ParseOptionalBooleanParameter(paramsObject, "keepWorldTransform", true);
+        var ping = ParseOptionalBooleanParameter(paramsObject, "ping");
+        var focus = ParseOptionalBooleanParameter(paramsObject, "focus");
+
+        var resolvedObject = ResolveObjectByInstanceId(instanceId, "instanceId");
+        var targetGameObject = ResolveSceneGameObjectTarget(resolvedObject, "instanceId");
+        var targetTransform = targetGameObject.transform;
+        var originalLocalPosition = targetTransform.localPosition;
+        var originalLocalRotation = targetTransform.localRotation;
+        var originalLocalScale = targetTransform.localScale;
+
+        GameObject? parentGameObject = null;
+        if (parentInstanceId.IsSpecified && parentInstanceId.HasValue)
+        {
+            var resolvedParentObject = ResolveObjectByInstanceId(parentInstanceId.Value!.Value, "parentInstanceId");
+            parentGameObject = ResolveSceneGameObjectTarget(resolvedParentObject, "parentInstanceId");
+
+            if (parentGameObject == targetGameObject)
+            {
+                throw new ArgumentException("Parameter 'parentInstanceId' cannot reference the same object as 'instanceId'.");
+            }
+
+            if (parentGameObject.transform.IsChildOf(targetTransform))
+            {
+                throw new ArgumentException("Parameter 'parentInstanceId' cannot reference a descendant of the target object.");
+            }
+
+            if (parentGameObject.scene != targetGameObject.scene)
+            {
+                throw new ArgumentException("Cross-scene parenting is not supported in the MVP.");
+            }
+        }
+
+        Undo.IncrementCurrentGroup();
+        Undo.SetTransformParent(targetTransform, parentGameObject != null ? parentGameObject.transform : null, "UnityMCP Set Parent");
+        if (!keepWorldTransform)
+        {
+            Undo.RecordObject(targetTransform, "UnityMCP Set Parent");
+            targetTransform.localPosition = originalLocalPosition;
+            targetTransform.localRotation = originalLocalRotation;
+            targetTransform.localScale = originalLocalScale;
+        }
+
+        EditorUtility.SetDirty(targetTransform);
+        Selection.activeGameObject = targetGameObject;
+        ApplySelectionEditorPresentation(targetGameObject, ping, focus);
+
+        var result = new
+        {
+            target = CreateObjectSummary(targetGameObject),
+            parent = parentGameObject != null ? CreateObjectSummary(parentGameObject) : null,
+            keepWorldTransform,
+            selection = BuildSelectionSummaryResult(),
+            applied = new
+            {
+                reparented = parentGameObject != null,
+                unparented = parentGameObject == null,
+                ping,
+                focus
+            }
+        };
+
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
+    private static string BuildDuplicateObjectResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "scene.duplicateObject");
+        var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var select = ParseOptionalBooleanParameter(paramsObject, "select", true);
+        var ping = ParseOptionalBooleanParameter(paramsObject, "ping");
+        var focus = ParseOptionalBooleanParameter(paramsObject, "focus");
+
+        var resolvedObject = ResolveObjectByInstanceId(instanceId, "instanceId");
+        var sourceGameObject = ResolveSceneGameObjectTarget(resolvedObject, "instanceId");
+        var sourceTransform = sourceGameObject.transform;
+        var parentTransform = sourceTransform.parent;
+
+        var duplicate = UnityEngine.Object.Instantiate(sourceGameObject, parentTransform);
+        duplicate.name = sourceGameObject.name;
+        if (duplicate.scene != sourceGameObject.scene && sourceGameObject.scene.IsValid() && sourceGameObject.scene.isLoaded)
+        {
+            SceneManager.MoveGameObjectToScene(duplicate, sourceGameObject.scene);
+        }
+
+        duplicate.transform.SetSiblingIndex(sourceTransform.GetSiblingIndex() + 1);
+        Undo.RegisterCreatedObjectUndo(duplicate, "UnityMCP Duplicate Object");
+
+        if (select)
+        {
+            Selection.activeGameObject = duplicate;
+            ApplySelectionEditorPresentation(duplicate, ping, focus);
+        }
+        else
+        {
+            ApplySceneObjectPresentationWithoutSelection(duplicate, ping, focus);
+        }
+
+        var result = new
+        {
+            source = CreateObjectSummary(sourceGameObject),
+            duplicate = CreateObjectSummary(duplicate),
+            selection = BuildSelectionSummaryResult(),
+            applied = new
+            {
+                selected = select,
+                ping,
+                focus
+            }
+        };
+
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
+    private static string BuildRenameObjectResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "scene.renameObject");
+        var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var name = ParseRequiredStringParameter(paramsObject, "name");
+
+        var resolvedObject = ResolveObjectByInstanceId(instanceId, "instanceId");
+        var targetGameObject = ResolveSceneGameObjectTarget(resolvedObject, "instanceId");
+        var previousName = targetGameObject.name;
+
+        Undo.RecordObject(targetGameObject, "UnityMCP Rename Object");
+        targetGameObject.name = name;
+        EditorUtility.SetDirty(targetGameObject);
+
+        var result = new
+        {
+            target = CreateObjectSummary(targetGameObject),
+            previousName,
+            currentName = targetGameObject.name,
+            applied = new
+            {
+                name = targetGameObject.name
+            }
+        };
+
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
+    private static string BuildSetActiveResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "scene.setActive");
+        var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var active = ParseRequiredBooleanParameter(paramsObject, "active");
+
+        var resolvedObject = ResolveObjectByInstanceId(instanceId, "instanceId");
+        var targetGameObject = ResolveSceneGameObjectTarget(resolvedObject, "instanceId");
+
+        Undo.RecordObject(targetGameObject, "UnityMCP Set Active");
+        targetGameObject.SetActive(active);
+        EditorUtility.SetDirty(targetGameObject);
+
+        var result = new
+        {
+            target = CreateObjectSummary(targetGameObject),
+            activeSelf = targetGameObject.activeSelf,
+            activeInHierarchy = targetGameObject.activeInHierarchy,
+            applied = new
+            {
+                active
+            }
+        };
+
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
+    private static string BuildInstantiatePrefabResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "prefab.instantiate");
+        var assetPath = NormalizeAndValidateAssetPath(ParseRequiredStringParameter(paramsObject, "assetPath"));
+        var parentInstanceId = ParseOptionalNullableIntegerParameter(paramsObject, "parentInstanceId");
+        var position = ParseOptionalVector3Parameter(paramsObject, "position");
+        var rotationEuler = ParseOptionalVector3Parameter(paramsObject, "rotationEuler");
+        var select = ParseOptionalBooleanParameter(paramsObject, "select", true);
+        var ping = ParseOptionalBooleanParameter(paramsObject, "ping");
+        var focus = ParseOptionalBooleanParameter(paramsObject, "focus");
+
+        var prefabAsset = LoadPrefabAsset(assetPath);
+        var activeScene = SceneManager.GetActiveScene();
+        if (!activeScene.IsValid() || !activeScene.isLoaded)
+        {
+            throw new InvalidOperationException("No active loaded scene is available for prefab instantiation.");
+        }
+
+        GameObject? parentGameObject = null;
+        if (parentInstanceId.IsSpecified && parentInstanceId.HasValue)
+        {
+            var resolvedParentObject = ResolveObjectByInstanceId(parentInstanceId.Value!.Value, "parentInstanceId");
+            parentGameObject = ResolveSceneGameObjectTarget(resolvedParentObject, "parentInstanceId");
+            if (parentGameObject.scene != activeScene)
+            {
+                throw new ArgumentException("Cross-scene parenting is not supported in the MVP. Parent must be in the active loaded scene.");
+            }
+        }
+
+        var instanceObject = PrefabUtility.InstantiatePrefab(prefabAsset, activeScene);
+        if (instanceObject is not GameObject instance)
+        {
+            throw new InvalidOperationException($"Unity did not return a GameObject when instantiating prefab '{assetPath}'.");
+        }
+
+        Undo.RegisterCreatedObjectUndo(instance, "UnityMCP Instantiate Prefab");
+
+        if (parentGameObject != null)
+        {
+            Undo.SetTransformParent(instance.transform, parentGameObject.transform, "UnityMCP Instantiate Prefab");
+        }
+
+        if (position.HasValue || rotationEuler.HasValue)
+        {
+            Undo.RecordObject(instance.transform, "UnityMCP Instantiate Prefab");
+            if (position.HasValue)
+            {
+                instance.transform.position = position.Value;
+            }
+
+            if (rotationEuler.HasValue)
+            {
+                instance.transform.rotation = Quaternion.Euler(rotationEuler.Value);
+            }
+        }
+
+        if (select)
+        {
+            Selection.activeGameObject = instance;
+            ApplySelectionEditorPresentation(instance, ping, focus);
+        }
+        else
+        {
+            ApplySceneObjectPresentationWithoutSelection(instance, ping, focus);
+        }
+
+        var result = new
+        {
+            instance = CreateObjectSummary(instance),
+            prefabSource = CreatePrefabAssetSummary(prefabAsset, instance),
+            selection = BuildSelectionSummaryResult(),
+            applied = new
+            {
+                parent = parentGameObject != null,
+                position = position.HasValue,
+                rotationEuler = rotationEuler.HasValue,
+                selected = select,
+                ping,
+                focus
+            }
+        };
+
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
+    private static string BuildGetPrefabSourceResponse(JToken idToken, JObject root)
+    {
+        var paramsObject = RequireParamsObject(root, "prefab.getSource");
+        var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var resolvedObject = ResolveObjectByInstanceId(instanceId, "instanceId");
+        var targetGameObject = ResolveSceneGameObjectTarget(resolvedObject, "instanceId");
+
+        var prefabDetails = InspectPrefabInstance(targetGameObject, "instanceId");
+
+        var result = new
+        {
+            target = CreateObjectSummary(targetGameObject),
+            prefabInstanceStatus = prefabDetails.PrefabInstanceStatus,
+            prefabAssetType = prefabDetails.PrefabAssetType,
+            instanceRoot = CreateObjectSummary(prefabDetails.OutermostPrefabInstanceRoot),
+            sourceAsset = CreatePrefabAssetSummary(prefabDetails.SourceAsset, prefabDetails.OutermostPrefabInstanceRoot),
+            nearestPrefabInstanceRoot = CreateObjectSummary(prefabDetails.NearestPrefabInstanceRoot),
+            isOutermostPrefabInstanceRoot = prefabDetails.IsOutermostPrefabInstanceRoot
+        };
+
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
+    private static string BuildApplyPrefabOverridesResponse(JToken idToken, JObject root)
+    {
+        var result = ApplyPrefabOverrides(root, "prefab.applyOverrides", revert: false);
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
+    private static string BuildRevertPrefabOverridesResponse(JToken idToken, JObject root)
+    {
+        var result = ApplyPrefabOverrides(root, "prefab.revertOverrides", revert: true);
+        return UnityMcpProtocol.CreateResult(idToken, result);
+    }
+
     private static string BuildFindByTagResponse(JToken idToken, JObject root)
     {
         if (!root.TryGetValue("params", out var paramsToken) || paramsToken is not JObject paramsObject)
@@ -5123,6 +5473,26 @@ internal sealed class UnityMcpClient : IDisposable
         };
     }
 
+    private static PrefabOverrideScope ParseOptionalPrefabOverrideScopeParameter(
+        JObject paramsObject,
+        string parameterName,
+        PrefabOverrideScope defaultValue = PrefabOverrideScope.InstanceRoot)
+    {
+        var value = ParseOptionalStringParameter(paramsObject, parameterName);
+        if (value == null)
+        {
+            return defaultValue;
+        }
+
+        return value switch
+        {
+            "instanceRoot" => PrefabOverrideScope.InstanceRoot,
+            "object" => PrefabOverrideScope.Object,
+            "component" => PrefabOverrideScope.Component,
+            _ => throw new ArgumentException($"Parameter '{parameterName}' has invalid value '{value}'. Expected instanceRoot, object, or component.")
+        };
+    }
+
     private static SoftJointLimitUpdate ParseOptionalSoftJointLimitParameter(JObject paramsObject, string parameterName)
     {
         var objectToken = ParseOptionalObjectParameter(paramsObject, parameterName);
@@ -5234,6 +5604,22 @@ internal sealed class UnityMcpClient : IDisposable
         return value.Value;
     }
 
+    private static bool ParseRequiredBooleanParameter(JObject paramsObject, string parameterName)
+    {
+        if (!paramsObject.TryGetValue(parameterName, out var token) || token.Type != JTokenType.Boolean)
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' is required and must be a boolean.");
+        }
+
+        var value = token.Value<bool?>();
+        if (!value.HasValue)
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' is required and must be a boolean.");
+        }
+
+        return value.Value;
+    }
+
     private static UnityEngine.Object ResolveObjectByInstanceId(int instanceId, string parameterName)
     {
         var resolved = TryResolveObjectByEntityId(instanceId) ?? ResolveObjectByLegacyInstanceId(instanceId);
@@ -5334,6 +5720,82 @@ internal sealed class UnityMcpClient : IDisposable
         }
 
         ValidateDestroyableSceneObject(component.gameObject, parameterName);
+    }
+
+    private static GameObject ResolveSceneGameObjectTarget(UnityEngine.Object resolvedObject, string parameterName)
+    {
+        var gameObject = ResolveGameObjectTarget(resolvedObject, parameterName);
+        ValidateDestroyableSceneObject(gameObject, parameterName);
+        return gameObject;
+    }
+
+    private static Component ResolveSceneComponentTarget(UnityEngine.Object resolvedObject, string parameterName)
+    {
+        var component = ResolveComponentTarget(resolvedObject, parameterName);
+        ValidateDestroyableSceneObject(component, parameterName);
+        return component;
+    }
+
+    private static Component ResolveSceneComponentTargetAllowingTransform(UnityEngine.Object resolvedObject, string parameterName)
+    {
+        var component = ResolveComponentTarget(resolvedObject, parameterName);
+        ValidateDestroyableSceneObject(component.gameObject, parameterName);
+        return component;
+    }
+
+    private static GameObject LoadPrefabAsset(string assetPath)
+    {
+        var prefabAsset = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
+        if (prefabAsset == null || !PrefabUtility.IsPartOfPrefabAsset(prefabAsset))
+        {
+            throw new ArgumentException($"Asset path '{assetPath}' does not point to a prefab asset.");
+        }
+
+        return prefabAsset;
+    }
+
+    private static PrefabInstanceDetails InspectPrefabInstance(GameObject targetGameObject, string parameterName)
+    {
+        var prefabInstanceStatus = PrefabUtility.GetPrefabInstanceStatus(targetGameObject);
+        if (prefabInstanceStatus == PrefabInstanceStatus.NotAPrefab)
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' must reference an object that is part of a prefab instance.");
+        }
+
+        var nearestPrefabInstanceRoot = PrefabUtility.GetNearestPrefabInstanceRoot(targetGameObject);
+        var outermostPrefabInstanceRoot = PrefabUtility.GetOutermostPrefabInstanceRoot(targetGameObject);
+        if (nearestPrefabInstanceRoot == null || outermostPrefabInstanceRoot == null)
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' must reference an object that is part of a prefab instance.");
+        }
+
+        var assetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(targetGameObject);
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+            throw new ArgumentException($"Parameter '{parameterName}' does not resolve to a prefab source asset.");
+        }
+
+        var sourceAsset = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
+        if (sourceAsset == null)
+        {
+            throw new ArgumentException($"Prefab source asset '{assetPath}' could not be loaded.");
+        }
+
+        var guid = AssetDatabase.AssetPathToGUID(assetPath);
+        if (string.IsNullOrWhiteSpace(guid))
+        {
+            throw new ArgumentException($"Prefab source asset '{assetPath}' does not have a valid GUID.");
+        }
+
+        return new PrefabInstanceDetails(
+            targetGameObject,
+            nearestPrefabInstanceRoot,
+            outermostPrefabInstanceRoot,
+            sourceAsset,
+            assetPath,
+            guid,
+            prefabInstanceStatus.ToString(),
+            PrefabUtility.GetPrefabAssetType(targetGameObject).ToString());
     }
 
     private static void ValidateWritableSerializedProperty(SerializedProperty property)
@@ -5971,6 +6433,43 @@ internal sealed class UnityMcpClient : IDisposable
         }
 
         _ = TryFrameSelectionInSceneView();
+    }
+
+    private static void ApplySceneObjectPresentationWithoutSelection(GameObject targetGameObject, bool ping, bool focus)
+    {
+        if (ping)
+        {
+            EditorGUIUtility.PingObject(targetGameObject);
+        }
+
+        if (!focus)
+        {
+            return;
+        }
+
+        _ = TryFrameGameObjectWithoutChangingSelection(targetGameObject);
+    }
+
+    private static bool TryFrameGameObjectWithoutChangingSelection(GameObject targetGameObject)
+    {
+        if (!targetGameObject.scene.IsValid() || !targetGameObject.scene.isLoaded || SceneView.lastActiveSceneView == null)
+        {
+            return false;
+        }
+
+        var previousSelection = Selection.objects;
+        var previousActiveObject = Selection.activeObject;
+
+        try
+        {
+            Selection.activeObject = targetGameObject;
+            Selection.objects = new UnityEngine.Object[] { targetGameObject };
+            return TryFrameSelectionInSceneView();
+        }
+        finally
+        {
+            _ = TryRestoreSelection(previousSelection, previousActiveObject);
+        }
     }
 
     private static bool TryFrameSelectionInSceneView()
@@ -6704,6 +7203,134 @@ internal sealed class UnityMcpClient : IDisposable
 
         var relativePath = assetPath.Replace('/', Path.DirectorySeparatorChar);
         return Path.Combine(projectRoot, relativePath);
+    }
+
+    private static object ApplyPrefabOverrides(JObject root, string methodName, bool revert)
+    {
+        var paramsObject = RequireParamsObject(root, methodName);
+        var instanceId = ParseRequiredIntegerParameter(paramsObject, "instanceId");
+        var scope = ParseOptionalPrefabOverrideScopeParameter(paramsObject, "scope");
+        var componentInstanceId = ParseOptionalIntegerParameter(paramsObject, "componentInstanceId");
+
+        var resolvedObject = ResolveObjectByInstanceId(instanceId, "instanceId");
+        var targetGameObject = ResolveSceneGameObjectTarget(resolvedObject, "instanceId");
+        var prefabDetails = InspectPrefabInstance(targetGameObject, "instanceId");
+
+        Component? componentTarget = null;
+        switch (scope)
+        {
+            case PrefabOverrideScope.InstanceRoot:
+                if (revert)
+                {
+                    PrefabUtility.RevertPrefabInstance(prefabDetails.OutermostPrefabInstanceRoot, InteractionMode.UserAction);
+                }
+                else
+                {
+                    PrefabUtility.ApplyPrefabInstance(prefabDetails.OutermostPrefabInstanceRoot, InteractionMode.UserAction);
+                }
+
+                break;
+
+            case PrefabOverrideScope.Object:
+                if (revert)
+                {
+                    PrefabUtility.RevertObjectOverride(targetGameObject, InteractionMode.UserAction);
+                }
+                else
+                {
+                    PrefabUtility.ApplyObjectOverride(targetGameObject, prefabDetails.AssetPath, InteractionMode.UserAction);
+                }
+
+                break;
+
+            case PrefabOverrideScope.Component:
+                componentTarget = ResolvePrefabOverrideComponentTarget(resolvedObject, targetGameObject, componentInstanceId);
+                if (revert)
+                {
+                    PrefabUtility.RevertObjectOverride(componentTarget, InteractionMode.UserAction);
+                }
+                else
+                {
+                    PrefabUtility.ApplyObjectOverride(componentTarget, prefabDetails.AssetPath, InteractionMode.UserAction);
+                }
+
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+
+        AssetDatabase.SaveAssets();
+
+        return new
+        {
+            target = CreateObjectSummary(targetGameObject),
+            scope = CreatePrefabOverrideScopeName(scope),
+            prefabSource = CreatePrefabAssetSummary(prefabDetails.SourceAsset, prefabDetails.OutermostPrefabInstanceRoot),
+            applied = new
+            {
+                scope = CreatePrefabOverrideScopeName(scope),
+                componentInstanceId = componentTarget != null ? componentTarget.GetInstanceID() : (int?)null
+            }
+        };
+    }
+
+    private static Component ResolvePrefabOverrideComponentTarget(
+        UnityEngine.Object resolvedObject,
+        GameObject targetGameObject,
+        int? componentInstanceId)
+    {
+        Component? componentTarget = null;
+
+        if (componentInstanceId.HasValue)
+        {
+            var resolvedComponentObject = ResolveObjectByInstanceId(componentInstanceId.Value, "componentInstanceId");
+            componentTarget = ResolveSceneComponentTargetAllowingTransform(resolvedComponentObject, "componentInstanceId");
+        }
+        else if (resolvedObject is Component resolvedComponent)
+        {
+            componentTarget = ResolveSceneComponentTargetAllowingTransform(resolvedComponent, "instanceId");
+        }
+
+        if (componentTarget == null)
+        {
+            throw new ArgumentException("Scope 'component' requires 'componentInstanceId' or an 'instanceId' that resolves to a Component.");
+        }
+
+        if (componentTarget.gameObject != targetGameObject)
+        {
+            throw new ArgumentException("Parameter 'componentInstanceId' must reference a component on the resolved target object.");
+        }
+
+        return componentTarget;
+    }
+
+    private static string CreatePrefabOverrideScopeName(PrefabOverrideScope scope)
+    {
+        return scope switch
+        {
+            PrefabOverrideScope.InstanceRoot => "instanceRoot",
+            PrefabOverrideScope.Object => "object",
+            PrefabOverrideScope.Component => "component",
+            _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, null)
+        };
+    }
+
+    private static object CreatePrefabAssetSummary(GameObject prefabAsset, GameObject instanceContext)
+    {
+        var assetPath = AssetDatabase.GetAssetPath(prefabAsset);
+        var guid = AssetDatabase.AssetPathToGUID(assetPath);
+
+        return new
+        {
+            instanceId = prefabAsset.GetInstanceID(),
+            name = prefabAsset.name,
+            unityType = prefabAsset.GetType().FullName,
+            assetPath = string.IsNullOrWhiteSpace(assetPath) ? null : assetPath,
+            guid = string.IsNullOrWhiteSpace(guid) ? null : guid,
+            prefabInstanceStatus = PrefabUtility.GetPrefabInstanceStatus(instanceContext).ToString(),
+            prefabAssetType = PrefabUtility.GetPrefabAssetType(instanceContext).ToString()
+        };
     }
 
     private static object CreateSceneSummary(Scene scene, bool isActive)
